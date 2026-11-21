@@ -214,6 +214,20 @@ svg.chart-svg{width:100%;overflow:visible;display:block}
 @media(max-width:900px){.kpi-6{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:480px){.kpi-6{grid-template-columns:1fr}}
 @media(max-width:900px){body{overflow-x:clip}}  /* hidden bar tooltips must not widen the page on phones */
+/* CFG.filterLayout = 'top': the global filters sit in a bar under the tabs */
+.t-filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 14px;padding:8px 16px 10px;background:#fff;border-bottom:1px solid #D7D9DC;position:relative;z-index:97}
+.t-filters[hidden]{display:none}
+.t-filters .tf-title{align-self:center;font-size:10px;font-weight:700;color:#8C9198;text-transform:uppercase;letter-spacing:.08em;padding-right:4px;white-space:nowrap}
+.t-filters .filter-block{padding:0;flex:1 1 150px;min-width:130px;max-width:240px}
+.t-filters .reset-btn{margin:0;width:auto;padding:6px 14px;flex:0 0 auto;white-space:nowrap}
+.filters-top .t-body{height:calc(100vh - 154px - var(--tf-h, 0px))}
+@media(max-width:900px){
+  .t-filters{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;padding:10px 12px}
+  .t-filters .tf-title,.t-filters .reset-btn{grid-column:1/-1}
+  .t-filters .filter-block{max-width:none;min-width:0}
+  .t-filters .reset-btn{width:100%}
+  .filters-top .t-body{height:auto}
+}
 </style>
 </head>
 <body>
@@ -235,6 +249,7 @@ svg.chart-svg{width:100%;overflow:visible;display:block}
 
 <div class="t-tabs" id="tabBar" role="tablist"></div>
 <div class="t-note-m">ⓘ&nbsp; Representational dashboard built on synthetic data. Actual dashboard may vary in look and feel.</div>
+<div class="t-filters" id="topFilters" hidden></div>
 
 <div class="t-body">
   <button class="filter-toggle" type="button" id="filterToggle" aria-expanded="false" aria-controls="sidebar">☰ Filters &amp; data sources</button>
@@ -330,6 +345,7 @@ const CFG = {
   loading: 'Loading batch, dispatch and quality records…',
   sourceSystems: 'ERP + MES + LIMS + QMS',
   currency: 'INR',
+  filterLayout: 'top',
   noindex: true,
   asOf: {date: '31 Mar 2026', status: '31 Mar 2026 (end of FY 2025-26)', refreshed: '01 Apr 2026, 06:00 IST'},
   notice: 'Sample dashboard · synthetic data, illustrative plant names',
@@ -674,22 +690,31 @@ function buildUI() {
   if (AS.refreshed) $('lastRefreshed').textContent = 'Last refreshed: ' + AS.refreshed;
   if (AS.status) $('asOfStatus').textContent = 'Data as of: ' + AS.status;
   if (CFG.notice) document.querySelectorAll('.t-note, .t-note-m').forEach(el => el.textContent = 'ⓘ  ' + CFG.notice);
-  $('sidebar').innerHTML = `<div class="sidebar-section">Data Sources</div>` +
-    CFG.tabs.map((t, i) => `<div class="sidebar-item${i ? '' : ' active'}" data-tab="${t.id}" tabindex="0"><span class="sidebar-dot" style="background:${dots[i % dots.length]}"></span>${esc(t.source)}<span class="cnt">${t.count ? num(t.count(META)) : ''}</span></div>`).join('') +
-    `<hr class="sidebar-divider"/><div class="sidebar-section">Global Filters</div>
-    <div class="filter-block"><label class="filter-label" for="fFy">Financial Year</label><select class="filter-select" id="fFy">${fyOpts}</select></div>
+  const top = CFG.filterLayout === 'top';
+  const filters = `<div class="filter-block"><label class="filter-label" for="fFy">Financial Year</label><select class="filter-select" id="fFy">${fyOpts}</select></div>
     <div class="filter-block"><label class="filter-label" for="fPeriod">Period</label><select class="filter-select" id="fPeriod"></select></div>
     <div class="filter-block"><label class="filter-label" for="fRegion">${esc(DR.label)}</label><select class="filter-select" id="fRegion">${opt(-1, DR.all) + META.regions.map((c, i) => opt(i, c)).join('')}</select></div>
     <div class="filter-block"><label class="filter-label" for="fBranch">${esc(D.b.label)}</label><select class="filter-select" id="fBranch"></select></div>
     <div class="filter-block"><label class="filter-label" for="fCat">${esc(D.c.label)}</label><select class="filter-select" id="fCat">${opt(-1, D.c.all) + META.cats.map((c, i) => opt(i, c)).join('')}</select></div>
     <div class="filter-block"><label class="filter-label" for="fSeg">${esc(D.s.label)}</label><select class="filter-select" id="fSeg">${opt(-1, D.s.all) + META.segs.map((c, i) => opt(i, c)).join('')}</select></div>
-    <button class="reset-btn" type="button" onclick="resetFilters()">↺ Reset all filters</button>
-    <hr class="sidebar-divider"/><div class="sidebar-section">Quick Views</div>` +
+    <button class="reset-btn" type="button" onclick="resetFilters()">↺ Reset all filters</button>`;
+  $('sidebar').innerHTML = `<div class="sidebar-section">Data Sources</div>` +
+    CFG.tabs.map((t, i) => `<div class="sidebar-item${i ? '' : ' active'}" data-tab="${t.id}" tabindex="0"><span class="sidebar-dot" style="background:${dots[i % dots.length]}"></span>${esc(t.source)}<span class="cnt">${t.count ? num(t.count(META)) : ''}</span></div>`).join('') +
+    (top ? '' : `<hr class="sidebar-divider"/><div class="sidebar-section">Global Filters</div>${filters}`) +
+    `<hr class="sidebar-divider"/><div class="sidebar-section">Quick Views</div>` +
     CFG.tabs.map(t => `<div class="sidebar-item" data-tab="${t.id}" tabindex="0">${esc(t.quick)}</div>`).join('') +
     `<hr class="sidebar-divider"/><div style="padding:10px 14px"><div class="filter-label">Data Status</div>
     <div style="font-size:11px;color:#2E8B57;font-weight:600;margin-top:4px">● Current to ${esc(AS.date || '31 Dec 2025')}</div>
     <div style="font-size:10px;color:#A6AAB1;margin-top:3px">Source: ${esc(CFG.sourceSystems)}</div>
     <div style="font-size:10px;color:#A6AAB1;margin-top:1px">Algor Analytics © 2026</div></div>`;
+  if (top) {   // the filter bar must exist before the option lists are filled below
+    $('topFilters').innerHTML = `<div class="tf-title">Filters</div>${filters}`;
+    $('topFilters').hidden = false;
+    document.body.classList.add('filters-top');
+    $('filterToggle').textContent = '☰ Data sources & quick views';
+    const fit = () => document.documentElement.style.setProperty('--tf-h', $('topFilters').offsetHeight + 'px');
+    fit(); window.addEventListener('resize', fit);
+  }
   let n = 0;
   $('views').innerHTML = CFG.tabs.map((t, ti) => {
     const reg = t.rows.flatMap(r => r.cards || [r]).find(w => w.type === 'register');
