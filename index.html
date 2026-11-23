@@ -228,6 +228,18 @@ svg.chart-svg{width:100%;overflow:visible;display:block}
   .t-filters .reset-btn{width:100%}
   .filters-top .t-body{height:auto}
 }
+/* config-driven tables (xtable) and the report-date picker (tab.dayPicker) */
+.day-pick{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:10px;font-weight:700;color:#8C9198;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.day-pick .filter-select{width:auto;min-width:160px;text-transform:none;letter-spacing:0;font-weight:700;color:#8B0000;border-color:#C9A9A9}
+.x-table td.c-good{background:#EAF6EF;color:#1F6B42;font-weight:600}
+.x-table td.c-warn{background:#FFF4DB;color:#8A6100;font-weight:600}
+.x-table td.c-bad{background:#FDE8E8;color:#B03A2E;font-weight:700}
+.x-table tr.grp td{background:#F4F4F5;font-weight:700;color:#2B2E33}
+.x-table tr.tot td{border-top:2px solid #2B2E33;font-weight:700;color:#2B2E33;background:#FAFAFB}
+.x-table td.sub{padding-left:20px}
+.x-table td.wrap{white-space:normal;min-width:150px}
+.b-site{background:#F1F1F3;color:#43474C;border:1px solid #D7D9DC}
+@media(max-width:900px){.day-pick{margin-left:0;width:100%}.day-pick .filter-select{flex:1}}
 </style>
 </head>
 <body>
@@ -324,6 +336,10 @@ let META = null;
 const fmtDate = d => { const x = new Date(Date.UTC(META.baseYear, SM(), 1) + d * 864e5); return String(x.getUTCDate()).padStart(2, '0') + ' ' + MON[x.getUTCMonth()] + ' ' + x.getUTCFullYear(); };
 const monthName = m => MONF(m) + ' ' + (META.baseYear + Math.floor((m + SM()) / 12));
 FMT.date = fmtDate; FMT.month = monthName;
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayName = d => DOW[new Date(Date.UTC(META.baseYear, SM(), 1) + d * 864e5).getUTCDay()] + ' ' + fmtDate(d);
+FMT.dday = dayName;
+const LASTM = () => (META.nMonths || 1e9) - 1;   // last month with data (the latest financial year may be part-way through)
 
 // ── Pharma plant network (sample): dashboard definition ─────
 const INV_BADGE = {'Good': 'b-good', 'Low': 'b-low', 'Critical': 'b-critical', 'Out of stock': 'b-stockout'};
@@ -347,6 +363,7 @@ const CFG = {
   currency: 'INR',
   filterLayout: 'top',
   noindex: true,
+  website: 'https://www.algor-consulting.com/',
   asOf: {date: '31 Mar 2026', status: '31 Mar 2026 (end of FY 2025-26)', refreshed: '01 Apr 2026, 06:00 IST'},
   notice: 'Sample dashboard · synthetic data, illustrative plant names',
   dims: {r: {label: 'Plant Type', all: 'All Plant Types', chip: 'All plant types'}, b: {label: 'Plant', plural: 'Plants', all: 'All Plants'},
@@ -575,15 +592,16 @@ function agg(name, m0, m1, by, f) {
   if (!C) throw new Error('Unknown cube ' + name);
   const n = by === 'm' ? m1 - m0 + 1 : groupCount(C, by), M = C.meas.length;
   const acc = C.meas.map(() => new Float64Array(n));
-  const hasB = !!C.b, hasC = !!C.c, hasS = !!C.s;
+  const hasB = !!C.b, hasR = !hasB && !!C.r, hasC = !!C.c, hasS = !!C.s;   // hasR: a site-level cube (region dimension, no branch)
   for (let i = 0; i < C.n; i++) {
     const m = C.m[i];
     if (m < m0 || m > m1) continue;
     let b = -1;
     if (hasB) { b = C.b[i]; if (f.branch >= 0 && b !== f.branch) continue; if (f.region >= 0 && bRegion[b] !== f.region) continue; }
+    else if (hasR) { const rr = C.r[i]; if (f.region >= 0 && rr !== f.region) continue; if (f.branch >= 0 && rr !== bRegion[f.branch]) continue; }
     if (hasC && f.cat >= 0 && C.c[i] !== f.cat) continue;
     if (hasS && f.seg >= 0 && C.s[i] !== f.seg) continue;
-    const g = by === 'm' ? m - m0 : by === 'b' ? b : by === 'r' ? bRegion[b] : by === 'c' ? C.c[i] : by === 's' ? C.s[i] : by === 'k' ? C.k[i] : 0;
+    const g = by === 'm' ? m - m0 : by === 'b' ? b : by === 'r' ? (hasR ? C.r[i] : bRegion[b]) : by === 'c' ? C.c[i] : by === 's' ? C.s[i] : by === 'k' ? C.k[i] : 0;
     const isEnd = by === 'm' || m === m1;
     for (let j = 0; j < M; j++) { if (C.stock[j] && !isEnd) continue; acc[j][g] += C.vals[j][i]; }
   }
@@ -596,6 +614,11 @@ function makeCtx(f, m0, m1) {
     t: cube => agg(cube, m0, m1, null, f)[0],
     by: (cube, dim) => agg(cube, m0, m1, dim, f),
     mon: cube => agg(cube, m0, m1, 'm', f)};
+}
+// a site-level cube (no split by branch) shows the whole site when one branch is selected
+function siteNote(cube) {
+  const C = CUBES[cube];
+  return C && !C.b && C.r && X.f.branch >= 0 ? `${((CFG.dims.r && CFG.dims.r.label) || 'Region').toLowerCase()} totals shown (not split by ${CFG.dims.b.label.toLowerCase()})` : '';
 }
 // filters that are set but do not apply to a cube (it has no such dimension)
 function notApplied(cube) {
@@ -618,17 +641,20 @@ function fullLabel(dim, cube, i) { return dim === 'm' ? monthName(X.r.m0 + i) : 
 function opt(v, t) { return `<option value="${v}">${esc(t)}</option>`; }
 function fyYear(fy) { return META.baseYear + fy; }
 function getFilters() { return {fy: +$('fFy').value, period: $('fPeriod').value, region: +$('fRegion').value, branch: +$('fBranch').value, cat: +$('fCat').value, seg: +$('fSeg').value}; }
-function periodRange(fy, period) {
+function periodBounds(fy, period) {
   let a, b;
   if (period === 'all') { a = 0; b = 11; } else if (period === 'h1') { a = 0; b = 5; } else if (period === 'h2') { a = 6; b = 11; }
   else if (period[0] === 'q') { a = (+period[1] - 1) * 3; b = a + 2; } else { a = b = +period.slice(1); }
   return {m0: fy * 12 + a, m1: fy * 12 + b};
 }
+function periodRange(fy, period) { const p = periodBounds(fy, period); return {m0: p.m0, m1: Math.min(p.m1, LASTM())}; }
+const toDate = nm => nm === 'Full year' ? 'Year to date' : nm + ' to date';
 function periodLabel(f) {
-  const r = periodRange(f.fy, f.period);
+  const r = periodRange(f.fy, f.period), cut = r.m1 < periodBounds(f.fy, f.period).m1;
   const span = r.m0 === r.m1 ? monthName(r.m0) : `${monthName(r.m0)} – ${monthName(r.m1)}`;
-  const name = f.period[0] === 'm' ? '' : (PERIODS.find(p => p[0] === f.period)[1].split(' (')[0] + ' · ');
-  return `${META.fyLabels[f.fy]} · ${name}${span}`;
+  let name = f.period[0] === 'm' ? '' : PERIODS.find(p => p[0] === f.period)[1].split(' (')[0];
+  if (name && cut) name = toDate(name);
+  return `${META.fyLabels[f.fy]} · ${name ? name + ' · ' : ''}${span}`;
 }
 function segLabel(f) {
   const p = [];
@@ -639,7 +665,12 @@ function segLabel(f) {
 }
 function buildPeriodOptions() {
   const fy = +$('fFy').value;
-  $('fPeriod').innerHTML = PERIODS.map(([v, t]) => opt(v, t)).join('') + MON.map((m, i) => opt('m' + i, monthName(fy * 12 + i))).join('');
+  const L = LASTM(), ps = PERIODS.filter(([v]) => periodBounds(fy, v).m0 <= L).map(([v, t]) => {
+    const p = periodBounds(fy, v);
+    if (p.m1 <= L) return [v, t];
+    return [v, `${toDate(t.split(' (')[0])} (${MONF(p.m0 - fy * 12)}${L > p.m0 ? '–' + MONF(L - fy * 12) : ''})`];
+  });
+  $('fPeriod').innerHTML = ps.map(([v, t]) => opt(v, t)).join('') + MON.map((m, i) => i).filter(i => fy * 12 + i <= L).map(i => opt('m' + i, monthName(fy * 12 + i))).join('');
 }
 function buildBranchOptions() {
   const region = +$('fRegion').value, cur = $('fBranch').value, D = CFG.dims.b;
@@ -672,6 +703,8 @@ function widgetHTML(w) {
     case 'donut': return card(w, `<div class="donut-wrap"><svg viewBox="0 0 100 100" width="118" height="118" id="${w.id}g" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"></svg><div class="donut-legend" id="${w.id}l"></div></div>`);
     case 'table': case 'bench': case 'budget':
       return card(w, `<div class="tbl-wrap"${w.type === 'budget' ? ' style="max-height:260px;overflow-y:auto"' : ''}><table class="t-table" id="${w.id}g"></table></div>`);
+    case 'xline': return card(w, `<div class="legend-row" id="${w.id}l"></div><svg class="chart-svg" id="${w.id}g" viewBox="0 0 460 190" xmlns="http://www.w3.org/2000/svg"></svg>`);
+    case 'xtable': return card(w, `<div class="tbl-wrap"><table class="t-table x-table" id="${w.id}g"></table></div>`);
     case 'register': return card(Object.assign(w, {wide: true}), `<div class="tbl-wrap"><table class="t-table sortable" id="${w.id}g"></table></div><div class="reg-foot" id="${w.id}f"></div>`);
   }
   throw new Error('Unknown widget ' + w.type);
@@ -685,11 +718,17 @@ function buildUI() {
   $('tabBar').innerHTML = CFG.tabs.map((t, i) => `<button class="t-tab${i ? '' : ' active'}" type="button" data-tab="${t.id}">${esc(t.label)}</button>`).join('') +
     '<div class="t-note">ⓘ&nbsp; Representational dashboard built on synthetic data. Actual dashboard may vary in look and feel.</div>';
   const dots = ['#B22222', '#2E6FA8', '#B8860B', '#2E8B57', '#6B7280', '#7B4FA0'];
-  const fyOpts = META.fySelectable.map(fy => opt(fy, SM() ? `${META.fyLabels[fy]} (${monthName(fy * 12)} – ${monthName(fy * 12 + 11)})` : `${META.fyLabels[fy]} (Jan – Dec ${fyYear(fy)})`)).join('');
+  const fyOpts = META.fySelectable.map(fy => opt(fy, SM() ? (fy * 12 + 11 > LASTM() ? `${META.fyLabels[fy]} (${MONF(0)} – ${monthName(LASTM())}, to date)` : `${META.fyLabels[fy]} (${monthName(fy * 12)} – ${monthName(fy * 12 + 11)})`) : `${META.fyLabels[fy]} (Jan – Dec ${fyYear(fy)})`)).join('');
   const D = CFG.dims, DR = D.r || {label: 'Region', all: 'All Regions'}, AS = CFG.asOf || {};
   if (AS.refreshed) $('lastRefreshed').textContent = 'Last refreshed: ' + AS.refreshed;
   if (AS.status) $('asOfStatus').textContent = 'Data as of: ' + AS.status;
   if (CFG.notice) document.querySelectorAll('.t-note, .t-note-m').forEach(el => el.textContent = 'ⓘ  ' + CFG.notice);
+  if (CFG.website) {   // optional link to the ALGOR website: toolbar logo, a toolbar button and the status bar
+    const u = CFG.website, host = u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''), a = `href="${esc(u)}" target="_blank" rel="noopener"`;
+    const logo = document.querySelector('.t-toolbar-logo'); logo.outerHTML = `<a class="t-toolbar-logo" ${a} style="text-decoration:none">${logo.innerHTML}</a>`;
+    document.querySelector('.t-toolbar-right').insertAdjacentHTML('afterbegin', `<a class="t-btn t-btn-outline" ${a}>🌐 ${esc(host)}</a>`);
+    const sr = document.querySelector('.t-status-right'); sr.innerHTML = `<a ${a} style="color:inherit">${esc(host)}</a> · ` + sr.innerHTML;
+  }
   const top = CFG.filterLayout === 'top';
   const filters = `<div class="filter-block"><label class="filter-label" for="fFy">Financial Year</label><select class="filter-select" id="fFy">${fyOpts}</select></div>
     <div class="filter-block"><label class="filter-label" for="fPeriod">Period</label><select class="filter-select" id="fPeriod"></select></div>
@@ -719,7 +758,7 @@ function buildUI() {
   $('views').innerHTML = CFG.tabs.map((t, ti) => {
     const reg = t.rows.flatMap(r => r.cards || [r]).find(w => w.type === 'register');
     t.kpis.forEach(w => { w.id = 'w' + (n++); w.tab = t.id; WID.push(w); });
-    const kpiCls = t.kpis.some(w => w.type === 'pulse') ? 'kpi-6' : 'kpi-4';
+    const kpiCls = t.kpiGrid || (t.kpis.some(w => w.type === 'pulse') ? 'kpi-6' : 'kpi-4');
     const kpis = `<div class="kpi-strip ${kpiCls}" id="kpis-${t.id}">${t.kpis.map(widgetHTML).join('')}</div>`;
     const rows = t.rows.map(r => {
       const cards = r.cards || [r];
@@ -729,11 +768,13 @@ function buildUI() {
     }).join('');
     const search = reg ? `<input class="search-box" type="search" placeholder="🔍 ${esc(t.searchPh || 'Search records...')}" aria-label="Search" oninput="regSearch('${reg.id}', this.value)"/>`
                        : `<input class="search-box" type="search" placeholder="🔍 Search metrics..." aria-label="Search metrics" oninput="filterKpiSearch('${t.id}', this.value)"/>`;
-    return `<div class="view${ti ? '' : ' active'}" id="view-${t.id}"><div class="view-header"><div><div class="view-title">${esc(t.title)}</div><div class="view-meta" id="meta-${t.id}">${esc(t.meta || '')}</div></div>${search}</div>${kpis}${rows}</div>`;
+    const pick = t.dayPicker ? `<label class="day-pick" for="fDay-${t.id}">${esc(t.dayPicker.label || 'Report date')}<select class="filter-select" id="fDay-${t.id}"></select></label>` : '';
+    return `<div class="view${ti ? '' : ' active'}" id="view-${t.id}"><div class="view-header"><div><div class="view-title">${esc(t.title)}</div><div class="view-meta" id="meta-${t.id}">${esc(typeof t.meta === 'string' ? t.meta : '')}</div></div>${pick}${search}</div>${kpis}${rows}</div>`;
   }).join('');
   WID.filter(w => w.type === 'register').forEach(w => REGSTATE[w.id] = {sort: w.sort ?? 0, asc: !!w.asc, q: ''});
   buildPeriodOptions(); buildBranchOptions();
-  $('fFy').onchange = () => { const keep = $('fPeriod').value; buildPeriodOptions(); $('fPeriod').value = keep; applyFilters(); };
+  $('fFy').onchange = () => { const keep = $('fPeriod').value; buildPeriodOptions(); $('fPeriod').value = keep; if (!$('fPeriod').value) $('fPeriod').value = 'all'; applyFilters(); };
+  CFG.tabs.filter(t => t.dayPicker).forEach(t => { $('fDay-' + t.id).onchange = e => { DAYSEL = +e.target.value; X.day = DAYSEL; renderTab(t.id); }; });
   $('fRegion').onchange = () => { buildBranchOptions(); applyFilters(); };
   ['fPeriod', 'fBranch', 'fCat', 'fSeg'].forEach(id => $(id).onchange = applyFilters);
   document.querySelectorAll('[data-tab]').forEach(el => {
@@ -747,15 +788,34 @@ function buildUI() {
 // ── apply ────────────────────────────────────────────────
 function applyFilters() {
   const f = getFilters(), r = periodRange(f.fy, f.period);
-  const pr = f.fy >= 1 ? periodRange(f.fy - 1, f.period) : null;
+  const pr = f.fy >= 1 ? {m0: r.m0 - 12, m1: r.m1 - 12} : null;   // the same months a year earlier (also for a part-year)
   X = {f, r, cur: makeCtx(f, r.m0, r.m1), pri: pr ? makeCtx(f, pr.m0, pr.m1) : null, priLabel: f.fy >= 1 ? META.fyLabels[f.fy - 1] : '', curLabel: META.fyLabels[f.fy]};
+  pickDays();
   renderFilterBar(f);
   const seg = segLabel(f);
-  CFG.tabs.forEach(t => { if (t.metaDynamic) $('meta-' + t.id).textContent = periodLabel(f) + (seg ? ' · ' + seg : ''); });
+  CFG.tabs.forEach(t => { if (typeof t.meta === 'function') $('meta-' + t.id).textContent = t.meta(X); else if (t.metaDynamic) $('meta-' + t.id).textContent = periodLabel(f) + (seg ? ' · ' + seg : ''); });
   for (const w of WID) {
     try { RENDER[w.type](w); }
     catch (e) { console.error('Widget ' + w.id + ' (' + (w.title || w.label) + ')', e); }
   }
+}
+// report-date picker: the days with records in the last month of the selected period (latest first)
+let DAYSEL = null;
+const DAYS_BY_M = {};
+function pickDays() {
+  const t = CFG.tabs.find(t => t.dayPicker); if (!t) return;
+  const R = REGS[t.dayPicker.reg], m = X.r.m1;
+  if (!DAYS_BY_M[m]) DAYS_BY_M[m] = [...new Set(R.rows.filter(r => r[R.idx.m] === m).map(r => r[R.idx.day]))].sort((a, b) => b - a);
+  const days = DAYS_BY_M[m], sel = $('fDay-' + t.id);
+  if (DAYSEL == null || !days.includes(DAYSEL)) DAYSEL = days.length ? days[0] : null;
+  sel.innerHTML = days.map(d => opt(d, dayName(d))).join('');
+  if (DAYSEL != null) sel.value = String(DAYSEL);
+  X.day = DAYSEL;
+}
+function renderTab(id) {
+  const t = CFG.tabs.find(x => x.id === id);
+  if (typeof t.meta === 'function') $('meta-' + id).textContent = t.meta(X);
+  for (const w of WID) if (w.tab === id) { try { RENDER[w.type](w); } catch (e) { console.error('Widget ' + w.id + ' (' + (w.title || w.label) + ')', e); } }
 }
 function renderFilterBar(f) {
   const D = CFG.dims;
@@ -800,6 +860,8 @@ function setSub(w, extra) {
   let s = typeof w.sub === 'function' ? w.sub(X) : (w.sub || '');
   const na = w.cube ? notApplied(w.cube) : [];
   if (na.length) s += (s ? ' · ' : '') + `${na.join(' and ')} filter not applied (not split this way)`;
+  const sn = w.cube ? siteNote(w.cube) : '';
+  if (sn) s += (s ? ' · ' : '') + sn;
   if (extra) s = extra;
   el.textContent = clean(s);
 }
@@ -926,7 +988,7 @@ const RENDER = {
       const bi = curB.indexOf(Math.max(...curB));
       if (curB.length > 1) ins += `Strongest month: ${monthName(X.r.m0 + bi)} (${F(curB[bi])}).`;
       if (w.budget && !budgetBlocked(w.budget.cube).length) {
-        const bt = w.budget.v(X.cur.t(w.budget.cube)); if (bt) ins += ` Budget achievement: <b>${(c / bt * 100).toFixed(1)}%</b> of ${F(bt)}.`;
+        const bt = w.budget.v(X.cur.t(w.budget.cube)); if (bt) ins += ` ${esc(w.budget.label || 'Budget achievement')}: <b>${(c / bt * 100).toFixed(1)}%</b> of ${F(bt)}.`;
       }
       if (w.extra) ins += ' ' + w.extra(X);
     }
@@ -957,8 +1019,9 @@ const RENDER = {
         else sub = 'No budget set for this selection';
       } else sub = `Budget line hidden: budgets are not split by ${blk.join(' or ')}`;
     }
-    const na = notApplied((w.series || [w])[0].cube || w.cube);
+    const c0 = (w.series || [w])[0].cube || w.cube, na = notApplied(c0), sn = siteNote(c0);
     if (na.length && !w.budget) sub += (sub ? ' · ' : '') + `${na.join(' and ')} filter not applied (not split this way)`;
+    if (sn) sub += (sub ? ' · ' : '') + sn;
     $(w.id + 's').textContent = clean(sub);
     $(w.id + 'l').innerHTML = (w.series && w.series.length > 1) || priVals || budVals ? leg : '';
     const A = w.axis ? fmtOf(w.axis) : (w.fmt === 'money' || !w.fmt ? v => kmoney(v) : w.fmt === 'num' ? knum : v => fmtOf(w.fmt)(v).replace(/[^\d.,\-−kKMB%]/g, '') || v.toFixed(1));
@@ -1063,6 +1126,27 @@ const RENDER = {
     $(w.id + 'g').innerHTML = `<thead><tr><th>Month</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Achieved</th><th>Status</th></tr></thead><tbody>${rows}</tbody>`;
   },
   register(w) { renderRegister(w.id); },
+  xline(w) {   // a line chart whose labels and series come from the config (e.g. the days of a month)
+    const d = w.data(X), F = fmtOf(w.fmt || 'num');
+    $(w.id + 'l').innerHTML = d.series.length > 1 ? d.series.map(s => `<span><i class="pl-swatch" style="border-top-color:${s.color}${s.dash ? ';border-top-style:dashed' : ''}"></i>${esc(s.label)}</span>`).join('') : '';
+    lineChart(w.id + 'g', d.labels, d.series, {axis: w.axis ? fmtOf(w.axis) : knum, target: w.target, targetLabel: w.targetLabel, targetOptional: true, zero: w.zero,
+      tip: d.tip || (i => `${d.labels[i]}: ${d.series.map(s => s.label + ' ' + F(s.vals[i])).join(' · ')}`)});
+    setSub(w); setAlert(w); setMini(w);
+  },
+  xtable(w) {   // a table whose header and rows come from the config; a cell is a value or {t, num, bg: good|warn|bad, badge, cls, title}
+    const d = w.data(X);
+    const cell = c => {
+      if (c == null || typeof c !== 'object') c = {t: c};
+      const cls = [c.num ? 'num' : '', c.bg ? 'c-' + c.bg : '', c.cls || ''].filter(Boolean).join(' ');
+      const inner = c.badge ? `<span class="badge ${c.badge}">${esc(c.t ?? '')}</span>` : esc(c.t ?? '');
+      return `<td${cls ? ` class="${cls}"` : ''}${c.title ? ` title="${esc(c.title)}"` : ''}>${inner}</td>`;
+    };
+    const head = `<thead><tr>${d.head.map(h => `<th class="${h.num ? 'num' : ''}">${esc(h.h)}</th>`).join('')}</tr></thead>`;
+    const body = d.rows.length ? d.rows.map(r => `<tr${r.cls ? ` class="${r.cls}"` : ''}>${r.cells.map(cell).join('')}</tr>`).join('')
+      : `<tr><td colspan="${d.head.length}" class="empty">${esc(d.empty || 'No records match the current filters')}</td></tr>`;
+    $(w.id + 'g').innerHTML = head + '<tbody>' + body + '</tbody>';
+    setSub(w); setAlert(w); setMini(w);
+  },
 };
 
 function filterKpiSearch(tab, q) {
@@ -1085,10 +1169,11 @@ function regCell(w, c, row) {
 // rows of a register that match the current filters; per = 'range' (month in period), 'end' (last month of period) or 'none'
 function regFilter(name, per = 'range') {
   const R = REGS[name], f = X.f, I = R.idx;
-  const iM = I.m, iB = I.b, iC = I.c, iS = I.s;
+  const iM = I.m, iB = I.b, iC = I.c, iS = I.s, iR = I.b == null ? I.r : undefined;   // iR: site-level rows
   return R.rows.filter(r => {
     if (iM != null && per !== 'none') { const m = r[iM]; if (per === 'end' ? m !== X.r.m1 : (m < X.r.m0 || m > X.r.m1)) return false; }
     if (iB != null) { const b = r[iB]; if (f.branch >= 0 && b !== f.branch) return false; if (f.region >= 0 && bRegion[b] !== f.region) return false; }
+    if (iR != null) { const rr = r[iR]; if (f.region >= 0 && rr !== f.region) return false; if (f.branch >= 0 && rr !== bRegion[f.branch]) return false; }
     if (iC != null && f.cat >= 0 && r[iC] !== f.cat) return false;
     if (iS != null && f.seg >= 0 && r[iS] !== f.seg) return false;
     return true;
@@ -1096,7 +1181,8 @@ function regFilter(name, per = 'range') {
 }
 function regRows(id) {
   const w = WID.find(x => x.id === id), st = REGSTATE[id];
-  const rows = regFilter(w.reg, w.period || 'range');
+  let rows = regFilter(w.reg, w.period || 'range');
+  if (w.where) rows = rows.filter(r => w.where(r, REGS[w.reg], X));
   const total = rows.length;
   const cells = rows.map(r => ({r, c: w.cols.map(c => regCell(w, c, r))}));
   let out = cells;
