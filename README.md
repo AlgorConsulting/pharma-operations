@@ -1,6 +1,7 @@
 # Plant Network Operational Excellence Dashboard (Sample)
 
 Live: https://algorconsulting.github.io/pharma-operations/
+Book a call: https://calendar.app.google/xiyrXcRKc4dQfyF88
 
 A representational sample built by ALGOR Consulting Group (https://www.algor-consulting.com/). All figures are synthetic and plant names are illustrative; no client data is used.
 
